@@ -1,9 +1,10 @@
-package util.objmapper
+package util.annotatedextractorpoc
 
+import util.objmapper.ObjMapper
 
-object ObjMapperExample { //extends App {
+object ExtractorExample extends App {
 
-  case class MainClass(foo: String, bar: String, baz: Int)
+  case class MainClass(@extract("strings")foo: String, @extract("strings")bar: String, baz: Int)
 
   case class SubSetClass1(bar: String)
 
@@ -11,12 +12,12 @@ object ObjMapperExample { //extends App {
 
   case class SubSetClass3(bar: String, baz: Int)
 
-  case class NotASubSetClass(foo: Int)
+  case class Extractor1( strings: List[String])
 
-  def mapperExample1() {
+  def extractorExample1() {
     import Macros._
 
-    implicit val mapper = objMapper[MainClass, SubSetClass1]
+    implicit val extractor = annotatedExtractor[MainClass, SubSetClass1]
 
     val mainVal = MainClass(foo = "fooVal", bar = "barVal", baz = 42)
     val mappedVal: SubSetClass1 = ObjMapper.mapValue(mainVal)
@@ -25,10 +26,10 @@ object ObjMapperExample { //extends App {
     printValues(mainVal, mappedVal)
   }
 
-  def mapperExample2() {
+  def extractorExample2() {
     import Macros._
 
-    implicit val mapper = objMapper[MainClass, SubSetClass2]
+    implicit val extractor = annotatedExtractor[MainClass, SubSetClass2]
 
     val mainVal = MainClass(foo = "fooVal", bar = "barVal", baz = 42)
     val mappedVal: SubSetClass2 = ObjMapper.mapValue(mainVal)
@@ -37,10 +38,10 @@ object ObjMapperExample { //extends App {
     printValues(mainVal, mappedVal)
   }
 
-  def mapperExample3() {
+  def extractorExample3() {
     import Macros._
 
-    implicit val mapper = objMapper[MainClass, SubSetClass3]
+    implicit val extractor = annotatedExtractor[MainClass, SubSetClass3]
 
     val mainVal = MainClass(foo = "fooVal", bar = "barVal", baz = 42)
     val mappedVal: SubSetClass3 = ObjMapper.mapValue(mainVal)
@@ -49,9 +50,9 @@ object ObjMapperExample { //extends App {
     printValues(mainVal, mappedVal)
   }
 
-  def mapperNotCompilesExample() {
+  def extractorNotCompilesExample() {
     // enable line below to see compile error
-    // val mapper = Macros.objMapper[MainClass, NotASubSetClass]
+    // val extractor = Macros.objMapper[MainClass, NotASubSetClass]
   }
 
 
@@ -63,9 +64,9 @@ object ObjMapperExample { //extends App {
     println()
   }
 
-  mapperExample1()
-  mapperExample2()
-  mapperExample3()
+  extractorExample1()
+  extractorExample2()
+  extractorExample3()
 
 
 }

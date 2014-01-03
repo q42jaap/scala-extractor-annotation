@@ -1,8 +1,12 @@
-package util.objmapper
+package util.annotatedextractorpoc
 
 import language.experimental.macros
 
 import reflect.macros.Context
+import util.objmapper.ObjMapper
+import scala.annotation.StaticAnnotation
+
+class extract(name: String) extends StaticAnnotation
 
 object MacrosImpl {
 
@@ -11,10 +15,9 @@ object MacrosImpl {
     val toType = c.weakTypeOf[TTo]
   }
 
-  def objMapperImpl[TFrom: c.WeakTypeTag, TTo: c.WeakTypeTag](c: Context)(): c.Expr[ObjMapper[TFrom, TTo]] = {
+  def annotatedExtractorImpl[TFrom: c.WeakTypeTag, TTo: c.WeakTypeTag](c: Context)(): c.Expr[ObjMapper[TFrom, TTo]] = {
     import c.universe._
     val helper = mkHelper[TFrom, TTo](c)
-    helper.checkSubSuperSet
 
     val body = helper.mapValueBody
 
@@ -71,8 +74,10 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
       // for each of the parameters to TTo.apply, make a tree that Selects the values with the same name
       // from the TFrom object
       params.map {
-        param =>
-          Select(obj, newTermName(param.name.toString))
+        case param if param.typeSignature == definitions.IntTpe =>
+          Literal(Constant(0))
+        case param =>
+          Literal(Constant(null))
       }
     }
 
