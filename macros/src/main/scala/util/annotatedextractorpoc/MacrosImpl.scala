@@ -6,7 +6,7 @@ import reflect.macros.Context
 import util.objmapper.ObjMapper
 import scala.annotation.StaticAnnotation
 
-class extract(name: String) extends StaticAnnotation
+//class extract(val name: String) extends StaticAnnotation
 
 object MacrosImpl {
 
@@ -33,6 +33,14 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
   import c.universe._
 
+  def echo(msg: String) {
+    c.echo(c.enclosingPosition, msg)
+  }
+
+  def abort(msg: String): Nothing = {
+    c.abort(c.enclosingPosition, msg)
+  }
+
   protected def fromType: c.Type
 
   protected def toType: c.Type
@@ -51,6 +59,29 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     applySymbol.asMethod
   }
 
+
+  def getExtractValue(tree: Tree): String = ???
+
+  private def extractables: Map[String, List[Symbol]] = {
+    val params = caseClassParams(fromType)
+    val extrList = params.map { param: Symbol =>
+      param.annotations.collect {
+        case ann if ann.tpe  <:< c.weakTypeOf[extract] =>
+  //        val args = extr.scalaArgs
+          val args = ann.javaArgs
+          val arg0 = args.get(newTermName("name")).getOrElse(abort("@extract() should have exactly 1 parameter"))
+
+          val name = arg0 match {
+            case litArg: LiteralArgument => litArg.value.value.asInstanceOf[String]
+            case _ => abort(s"unsuported use of @extract: $arg0")
+          }
+          echo(s"args @extract(name = $name)")
+          name -> param
+      }
+    }
+    extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
+  }
+
   /**
    * Creates the body of a mapValue method.
    */
@@ -63,6 +94,10 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     // we need the tree which you would've typed yourself, we cant just use the methodSymbol (for some reason)
     val constructorTree: Tree = Select(Ident(newTermName(toCompanion.name.toString)), newTermName("apply"))
 
+    val extrs = extractables
+    c.echo(c.enclosingPosition, s"$fromType extractables: ${extrs}")
+
+    c.abort(c.enclosingPosition, "blaat")
     // The list of trees will pass as arguments to the constructor
     val values: List[Tree] = {
       // we only support constructors with 1 parameterlist, this is already checked in checkSuperSet

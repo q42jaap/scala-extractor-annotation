@@ -1,10 +1,14 @@
 package util.annotatedextractorpoc
 
 import util.objmapper.ObjMapper
+import scala.annotation.StaticAnnotation
+
+
+//class special extends extract("strings") with StaticAnnotation
 
 object ExtractorExample extends App {
 
-  case class MainClass(@extract("strings")foo: String, @extract("strings")bar: String, baz: Int)
+  case class MainClass(@extract(name="strings") foo: String, bar: String, baz: Int)
 
   case class SubSetClass1(bar: String)
 
@@ -12,7 +16,7 @@ object ExtractorExample extends App {
 
   case class SubSetClass3(bar: String, baz: Int)
 
-  case class Extractor1( strings: List[String])
+  case class Extractor1(strings: List[String])
 
   def extractorExample1() {
     import Macros._
@@ -25,7 +29,7 @@ object ExtractorExample extends App {
     println("Example1")
     printValues(mainVal, mappedVal)
   }
-
+/*
   def extractorExample2() {
     import Macros._
 
@@ -54,7 +58,7 @@ object ExtractorExample extends App {
     // enable line below to see compile error
     // val extractor = Macros.objMapper[MainClass, NotASubSetClass]
   }
-
+*/
 
   def printValues(mainVal: Any, mappedVal: Any) {
     println()
@@ -65,8 +69,8 @@ object ExtractorExample extends App {
   }
 
   extractorExample1()
-  extractorExample2()
-  extractorExample3()
+  //extractorExample2()
+  //extractorExample3()
 
 
 }
