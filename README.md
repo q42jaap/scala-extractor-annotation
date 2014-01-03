@@ -1,4 +1,4 @@
-scala-objmapper
-===============
+scala-extractor-annotation
+==========================
 
-Scala macro for a simple object mapper based on case classes
+An ObjMapper scala macro which extracts values from a case class using marker annotations
