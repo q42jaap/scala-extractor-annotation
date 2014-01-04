@@ -6,7 +6,7 @@ import reflect.macros.Context
 import util.objmapper.ObjMapper
 import scala.annotation.StaticAnnotation
 
-//class extract(val name: String) extends StaticAnnotation
+class extract(val name: String) extends StaticAnnotation
 
 object MacrosImpl {
 
@@ -62,22 +62,41 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
   def getExtractValue(tree: Tree): String = ???
 
+
   private def extractables: Map[String, List[Symbol]] = {
     val params = caseClassParams(fromType)
-    val extrList = params.map { param: Symbol =>
-      param.annotations.collect {
-        case ann if ann.tpe  <:< c.weakTypeOf[extract] =>
-  //        val args = extr.scalaArgs
-          val args = ann.javaArgs
-          val arg0 = args.get(newTermName("name")).getOrElse(abort("@extract() should have exactly 1 parameter"))
+    val extrList = params.map {
+      param: Symbol =>
+        param.annotations.collect {
+          case ann if ann.tpe <:< c.weakTypeOf[extract] =>
+            //        val args = extr.scalaArgs
+            val args = ann.javaArgs
+            val arg0 = args.get(newTermName("name")).getOrElse(abort("@extract() should have exactly 1 parameter"))
 
-          val name = arg0 match {
-            case litArg: LiteralArgument => litArg.value.value.asInstanceOf[String]
-            case _ => abort(s"unsuported use of @extract: $arg0")
-          }
-          echo(s"args @extract(name = $name)")
-          name -> param
-      }
+            val name = arg0 match {
+              case litArg: LiteralArgument => litArg.value.value.asInstanceOf[String]
+              case _ => abort(s"unsuported use of @extract: $arg0")
+            }
+            echo(s"args @extract(name = $name)")
+            name -> param
+        }
+    }
+    extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
+  }
+
+  private def extractablesScala: Map[String, List[Symbol]] = {
+    val params = caseClassParams(fromType)
+    val extrList = params.map {
+      param: Symbol =>
+        param.annotations.collect {
+          case ann if ann.tpe <:< c.weakTypeOf[extract] =>
+            val args = ann.scalaArgs
+            val arg0 = args.head
+            val arg0expr = c.Expr(arg0)
+            val name: String = c.eval(arg0expr)
+            echo(s"args @extract(name = $name)")
+            name -> param
+        }
     }
     extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
   }
@@ -94,7 +113,7 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     // we need the tree which you would've typed yourself, we cant just use the methodSymbol (for some reason)
     val constructorTree: Tree = Select(Ident(newTermName(toCompanion.name.toString)), newTermName("apply"))
 
-    val extrs = extractables
+    val extrs = extractablesScala
     c.echo(c.enclosingPosition, s"$fromType extractables: ${extrs}")
 
     c.abort(c.enclosingPosition, "blaat")

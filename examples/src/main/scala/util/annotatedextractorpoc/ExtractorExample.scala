@@ -6,9 +6,11 @@ import scala.annotation.StaticAnnotation
 
 //class special extends extract("strings") with StaticAnnotation
 
+class commonlyUsed extends extract("commonName")
+
 object ExtractorExample extends App {
 
-  case class MainClass(@extract(name="strings") foo: String, bar: String, baz: Int)
+  case class MainClass(@extract("strings") foo: String, @commonlyUsed bar: String, baz: Int)
 
   case class SubSetClass1(bar: String)
 
