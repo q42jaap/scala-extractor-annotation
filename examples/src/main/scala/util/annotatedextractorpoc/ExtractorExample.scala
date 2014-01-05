@@ -6,11 +6,11 @@ import scala.annotation.StaticAnnotation
 
 //class special extends extract("strings") with StaticAnnotation
 
-class commonlyUsed extends extract("commonName")
+class ancestorIds extends ExtractAnnotation
 
 object ExtractorExample extends App {
 
-  case class MainClass(@extract("strings") foo: String, @commonlyUsed bar: String, baz: Int)
+  case class MainClass(@ancestorIds foo: String, bar: String, baz: Int)
 
   case class SubSetClass1(bar: String)
 
@@ -18,15 +18,15 @@ object ExtractorExample extends App {
 
   case class SubSetClass3(bar: String, baz: Int)
 
-  case class Extractor1(strings: List[String])
+  case class Extractor1(@ancestorIds ancestorIds: List[String], blaat: Int)
 
   def extractorExample1() {
     import Macros._
 
-    implicit val extractor = annotatedExtractor[MainClass, SubSetClass1]
+    implicit val extractor = annotatedExtractor[MainClass, Extractor1]
 
     val mainVal = MainClass(foo = "fooVal", bar = "barVal", baz = 42)
-    val mappedVal: SubSetClass1 = ObjMapper.mapValue(mainVal)
+    val mappedVal: Extractor1 = ObjMapper.mapValue(mainVal)
 
     println("Example1")
     printValues(mainVal, mappedVal)

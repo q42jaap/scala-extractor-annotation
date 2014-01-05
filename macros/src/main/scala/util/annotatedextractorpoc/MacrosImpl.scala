@@ -6,7 +6,7 @@ import reflect.macros.Context
 import util.objmapper.ObjMapper
 import scala.annotation.StaticAnnotation
 
-class extract(val name: String) extends StaticAnnotation
+trait ExtractAnnotation extends StaticAnnotation
 
 object MacrosImpl {
 
@@ -45,13 +45,13 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
   protected def toType: c.Type
 
-  private def fromTypeName = fromType.typeSymbol.name
+  lazy val fromTypeName = fromType.typeSymbol.name
 
-  private def toTypeName = toType.typeSymbol.name
+  lazy val toTypeName = toType.typeSymbol.name
 
-  private def toCompanion = toType.typeSymbol.companionSymbol
+  lazy val toCompanion = toType.typeSymbol.companionSymbol
 
-  private def toApplyMethod: MethodSymbol = {
+  lazy val toApplyMethod: MethodSymbol = {
     val applySymbol = toCompanion.typeSignature.declaration(newTermName("apply")) match {
       case NoSymbol => c.abort(c.enclosingPosition, s"No apply function found for $toTypeName")
       case s => s
@@ -59,24 +59,14 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     applySymbol.asMethod
   }
 
-
-  def getExtractValue(tree: Tree): String = ???
-
-
-  private def extractables: Map[String, List[Symbol]] = {
+  lazy val extractables: Map[String, List[Symbol]] = {
     val params = caseClassParams(fromType)
     val extrList = params.map {
       param: Symbol =>
         param.annotations.collect {
-          case ann if ann.tpe <:< c.weakTypeOf[extract] =>
-            //        val args = extr.scalaArgs
-            val args = ann.javaArgs
-            val arg0 = args.get(newTermName("name")).getOrElse(abort("@extract() should have exactly 1 parameter"))
+          case ann if ann.tpe <:< c.weakTypeOf[ExtractAnnotation] =>
 
-            val name = arg0 match {
-              case litArg: LiteralArgument => litArg.value.value.asInstanceOf[String]
-              case _ => abort(s"unsuported use of @extract: $arg0")
-            }
+            val name = ann.tpe.typeSymbol.name.toString
             echo(s"args @extract(name = $name)")
             name -> param
         }
@@ -84,22 +74,15 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
   }
 
-  private def extractablesScala: Map[String, List[Symbol]] = {
-    val params = caseClassParams(fromType)
-    val extrList = params.map {
-      param: Symbol =>
-        param.annotations.collect {
-          case ann if ann.tpe <:< c.weakTypeOf[extract] =>
-            val args = ann.scalaArgs
-            val arg0 = args.head
-            val arg0expr = c.Expr(arg0)
-            val name: String = c.eval(arg0expr)
-            echo(s"args @extract(name = $name)")
-            name -> param
-        }
-    }
-    extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
+  lazy val toParams = caseClassParams(toType)
+
+  def isRequiredParam(toParam: Symbol): Boolean = {
+    val paramType = toParam.typeSignature
+    val isList = paramType <:< c.weakTypeOf[List[_]]
+    val isOpt = paramType <:< c.weakTypeOf[Option[_]]
+    !(isList || isOpt)
   }
+
 
   /**
    * Creates the body of a mapValue method.
@@ -113,10 +96,26 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     // we need the tree which you would've typed yourself, we cant just use the methodSymbol (for some reason)
     val constructorTree: Tree = Select(Ident(newTermName(toCompanion.name.toString)), newTermName("apply"))
 
-    val extrs = extractablesScala
-    c.echo(c.enclosingPosition, s"$fromType extractables: ${extrs}")
+    echo(s"$fromType extractables: ${extractables}")
 
-    c.abort(c.enclosingPosition, "blaat")
+    val requiredParams = toParams.filter(isRequiredParam)
+    echo(s"$toType requiredParams: ${requiredParams}")
+    val optionalParams = toParams.filterNot(isRequiredParam)
+    echo(s"$toType optionalParams: ${optionalParams}")
+
+    val missingRequiredParams = requiredParams.filter {
+      reqParam =>
+        val result = !extractables.contains(reqParam.name.toString)
+        if (result)
+          c.echo(reqParam.pos, s"Required param is not extrable from $fromTypeName")
+        result
+    }
+
+    if (!missingRequiredParams.isEmpty)
+      abort(s"Missing required properties for mapping from $fromTypeName")
+
+
+    abort("blaat")
     // The list of trees will pass as arguments to the constructor
     val values: List[Tree] = {
       // we only support constructors with 1 parameterlist, this is already checked in checkSuperSet
