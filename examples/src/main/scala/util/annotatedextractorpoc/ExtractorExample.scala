@@ -7,10 +7,11 @@ import scala.annotation.StaticAnnotation
 //class special extends extract("strings") with StaticAnnotation
 
 class ancestorIds extends ExtractAnnotation
+class title extends ExtractAnnotation
 
 object ExtractorExample extends App {
 
-  case class MainClass(@ancestorIds foo: String, bar: String, baz: Int)
+  case class MainClass(@ancestorIds foo: String, @title bar: String, baz: Int)
 
   case class SubSetClass1(bar: String)
 
@@ -18,7 +19,7 @@ object ExtractorExample extends App {
 
   case class SubSetClass3(bar: String, baz: Int)
 
-  case class Extractor1(@ancestorIds ancestorIds: List[String], blaat: Int)
+  case class Extractor1(@ancestorIds ancestorIds: List[String], @title blaat: String)
 
   def extractorExample1() {
     import Macros._

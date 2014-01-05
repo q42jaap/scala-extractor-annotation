@@ -33,6 +33,8 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
   import c.universe._
 
+  val extractAnnType = c.weakTypeOf[ExtractAnnotation]
+
   def echo(msg: String) {
     c.echo(c.enclosingPosition, msg)
   }
@@ -59,30 +61,48 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     applySymbol.asMethod
   }
 
+  lazy val targetParams: Map[String, Symbol] = {
+    val params = caseClassParams(toType)
+    val targetList = params.map {
+      param: Symbol =>
+        val annotations = getExtractAnnotationNames(param)
+        annotations match {
+          case name :: Nil => name -> param
+          case Nil => c.abort(param.pos, s"Parameter should have an annotation which extends ${extractAnnType.typeSymbol.name}")
+          case lst => c.abort(param.pos, s"Parameter should have just one annotation which extends ${extractAnnType.typeSymbol.name}")
+        }
+    }
+    targetList.groupBy(_._1).foreach { tplListTpl: (String, List[(String, Symbol)]) =>
+      if (tplListTpl._2.size > 1)
+        c.abort(tplListTpl._2.last._2.pos, s"In the type $toTypeName there should be just 1 ${tplListTpl._1} annotation")
+    }
+    targetList.toMap
+  }
+
+
+  def getExtractAnnotationNames(param: Symbol): List[String] = {
+    param.annotations.collect {
+      case ann if ann.tpe <:< extractAnnType =>
+        ann.tpe.typeSymbol.name.toString
+    }
+  }
+
   lazy val extractables: Map[String, List[Symbol]] = {
     val params = caseClassParams(fromType)
     val extrList = params.map {
       param: Symbol =>
-        param.annotations.collect {
-          case ann if ann.tpe <:< c.weakTypeOf[ExtractAnnotation] =>
-
-            val name = ann.tpe.typeSymbol.name.toString
-            echo(s"args @extract(name = $name)")
-            name -> param
-        }
+        val annotations = getExtractAnnotationNames(param)
+        annotations.map(_ -> param)
     }
     extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
   }
 
-  lazy val toParams = caseClassParams(toType)
-
   def isRequiredParam(toParam: Symbol): Boolean = {
     val paramType = toParam.typeSignature
-    val isList = paramType <:< c.weakTypeOf[List[_]]
+    val isList = paramType <:< c.weakTypeOf[Iterable[_]]
     val isOpt = paramType <:< c.weakTypeOf[Option[_]]
     !(isList || isOpt)
   }
-
 
   /**
    * Creates the body of a mapValue method.
@@ -98,16 +118,18 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
     echo(s"$fromType extractables: ${extractables}")
 
-    val requiredParams = toParams.filter(isRequiredParam)
+    targetParams
+
+    val requiredParams = targetParams.filter(kv => isRequiredParam(kv._2))
     echo(s"$toType requiredParams: ${requiredParams}")
-    val optionalParams = toParams.filterNot(isRequiredParam)
+    val optionalParams = targetParams.filterNot(kv => isRequiredParam(kv._2))
     echo(s"$toType optionalParams: ${optionalParams}")
 
     val missingRequiredParams = requiredParams.filter {
-      reqParam =>
-        val result = !extractables.contains(reqParam.name.toString)
+      reqParamKv =>
+        val result = !extractables.contains(reqParamKv._1)
         if (result)
-          c.echo(reqParam.pos, s"Required param is not extrable from $fromTypeName")
+          c.error(reqParamKv._2.pos, s"Required param is not extrable from $fromTypeName")
         result
     }
 
@@ -115,7 +137,7 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
       abort(s"Missing required properties for mapping from $fromTypeName")
 
 
-    abort("blaat")
+    //abort("blaat")
     // The list of trees will pass as arguments to the constructor
     val values: List[Tree] = {
       // we only support constructors with 1 parameterlist, this is already checked in checkSuperSet
