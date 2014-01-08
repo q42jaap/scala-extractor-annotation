@@ -8,9 +8,48 @@ import scala.annotation.StaticAnnotation
 
 trait ExtractAnnotation extends StaticAnnotation
 
+abstract class ExtractorHelper[TFrom, TTo] extends ObjMapper[TFrom, TTo] {
+  val fromTypeName: String
+  val toTypeName: String
+
+  private def mkError(msg: String): IllegalStateException =
+    new IllegalStateException(s"Something error happen while mapping from $fromTypeName to $toTypeName: $msg")
+
+  def mkList[A](vals: List[_]): List[A] = {
+    val values = vals flatMap {
+      case it: Iterable[Option[A]] => it
+      case opt: Option[A] => List(opt)
+      case it: Iterable[A] => it.map(v => Some(v))
+      case v: A => List(Some(v))
+      case _ => throw mkError("Value has illegal type")
+    }
+    values.flatten
+  }
+
+  def mkOpt[A](vals: List[_]): Option[A] = {
+    val values = mkList[A](vals)
+
+    values match {
+      case Nil => None
+      case v :: Nil => Some(v)
+      case _ => throw mkError("Option value has more than 1 values")
+    }
+  }
+
+  def mkVal[A](vals: List[_]): A = {
+    val values = mkList[A](vals)
+
+    values match {
+      case Nil => throw mkError("Value is not available")
+      case v :: Nil => v
+      case _ => throw mkError("There are more than 1 valua available")
+    }
+  }
+}
+
 object MacrosImpl {
 
-  private def mkHelper[TFrom: c.WeakTypeTag, TTo: c.WeakTypeTag](c: Context) = new Helper[c.type, TFrom, TTo](c) {
+  private def mkHelper[TFrom: c.WeakTypeTag, TTo: c.WeakTypeTag](c: Context): Helper[c.type, TFrom, TTo] = new Helper[c.type, TFrom, TTo](c) {
     val fromType = c.weakTypeOf[TFrom]
     val toType = c.weakTypeOf[TTo]
   }
@@ -19,11 +58,17 @@ object MacrosImpl {
     import c.universe._
     val helper = mkHelper[TFrom, TTo](c)
 
+    helper.checkExtractableTypes()
+
     val body = helper.mapValueBody
 
     reify {
-      new ObjMapper[TFrom, TTo] {
+      new ExtractorHelper[TFrom, TTo] {
+        val fromTypeName = helper.fromTypeName.toString
+        val toTypeName = helper.toTypeName.toString
+
         def mapValue(obj: TFrom): TTo = body.splice
+
       }
     }
   }
@@ -72,9 +117,10 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
           case lst => c.abort(param.pos, s"Parameter should have just one annotation which extends ${extractAnnType.typeSymbol.name}")
         }
     }
-    targetList.groupBy(_._1).foreach { tplListTpl: (String, List[(String, Symbol)]) =>
-      if (tplListTpl._2.size > 1)
-        c.abort(tplListTpl._2.last._2.pos, s"In the type $toTypeName there should be just 1 ${tplListTpl._1} annotation")
+    targetList.groupBy(_._1).foreach {
+      tplListTpl: (String, List[(String, Symbol)]) =>
+        if (tplListTpl._2.size > 1)
+          c.abort(tplListTpl._2.last._2.pos, s"In the type $toTypeName there should be just 1 ${tplListTpl._1} annotation")
     }
     targetList.toMap
   }
@@ -97,33 +143,29 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
   }
 
-  def isRequiredParam(toParam: Symbol): Boolean = {
-    val paramType = toParam.typeSignature
-    val isList = paramType <:< c.weakTypeOf[Iterable[_]]
-    val isOpt = paramType <:< c.weakTypeOf[Option[_]]
-    !(isList || isOpt)
+  def isListParam(targetParam: Symbol): Boolean = {
+    val paramType = targetParam.typeSignature
+    paramType <:< c.weakTypeOf[List[_]]
   }
 
-  /**
-   * Creates the body of a mapValue method.
-   */
-  def mapValueBody: c.Expr[TTo] = {
-    // get a reference to the companion's apply method
-    // we'll use this for reflection only
-    val cTor: MethodSymbol = toApplyMethod
+  def isRequiredParam(targetParam: Symbol): Boolean = {
+    !(isOptionParam(targetParam) || isListParam(targetParam))
+  }
 
-    // select the apply method from the companion object
-    // we need the tree which you would've typed yourself, we cant just use the methodSymbol (for some reason)
-    val constructorTree: Tree = Select(Ident(newTermName(toCompanion.name.toString)), newTermName("apply"))
+  def isOptionParam(targetParam: Symbol) : Boolean = {
+    val paramType = targetParam.typeSignature
+    paramType <:< c.weakTypeOf[Option[_]]
+  }
 
-    echo(s"$fromType extractables: ${extractables}")
+  def checkExtractableTypes() {
+    // TODO: check whether extractables and targetParams are
+    // type compatible. Consider List/Iterable and Options
+    // when the target has an Option[A] the source can be a List[A] etc.
 
-    targetParams
-
-    val requiredParams = targetParams.filter(kv => isRequiredParam(kv._2))
-    echo(s"$toType requiredParams: ${requiredParams}")
-    val optionalParams = targetParams.filterNot(kv => isRequiredParam(kv._2))
-    echo(s"$toType optionalParams: ${optionalParams}")
+    // also: for a property that is required (neither Optional nor Iterable)
+    // we need to check that there can't be too much extractables for it.
+    // e.g. case class FromClass(@smthng prop1: String, @smthng prop2: String)
+    // can never be mapped to ToClass(@smthng prop: String), prop needs to be List[String]
 
     val missingRequiredParams = requiredParams.filter {
       reqParamKv =>
@@ -136,24 +178,73 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     if (!missingRequiredParams.isEmpty)
       abort(s"Missing required properties for mapping from $fromTypeName")
 
+    //TODO check for optionParams where there is Option[_]
+  }
 
-    //abort("blaat")
+  /**
+   * required parameters are parameter that don't have the type Option[_] or List[_]
+   * They will need to be present at any time.
+   */
+  lazy val requiredParams = targetParams.filter(kv => isRequiredParam(kv._2))
+  lazy val optionParams = targetParams.filter(kv => isOptionParam(kv._2))
+  lazy val listParams = targetParams.filter(kv => isListParam(kv._2))
+
+  /**
+   * Creates the body of a mapValue method.
+   */
+  def mapValueBody: c.Expr[TTo] = {
+
+
+    // get a reference to the companion's apply method
+    // we'll use this for reflection only
+    val cTor: MethodSymbol = toApplyMethod
+
+    // select the apply method from the companion object
+    // we need the tree which you would've typed yourself, we cant just use the methodSymbol (for some reason)
+    val constructorTree: Tree = Select(Ident(newTermName(toCompanion.name.toString)), newTermName("apply"))
+
+    echo(s"$fromType extractables: ${extractables}")
+
+    echo(s"$toType requiredParams: ${requiredParams}")
+    echo(s"$toType optionParams: ${optionParams}")
+    echo(s"$toType listParams: ${listParams}")
+
+
+
     // The list of trees will pass as arguments to the constructor
     val values: List[Tree] = {
-      // we only support constructors with 1 parameterlist, this is already checked in checkSuperSet
-      val params: List[Symbol] = cTor.paramss.head
-
       // a reference to the TFrom object
       val obj = Ident(newTermName("obj"))
+      val requiredValues: Map[String, Tree] = ???
+      val optionalValues: Map[String, Tree] = ???
 
       // for each of the parameters to TTo.apply, make a tree that Selects the values with the same name
       // from the TFrom object
-      params.map {
-        case param if param.typeSignature == definitions.IntTpe =>
-          Literal(Constant(0))
-        case param =>
-          Literal(Constant(null))
+
+      val requiredTrees = requiredParams.map {
+        case (name, param) =>
+          AssignOrNamedArg(Ident(newTermName(name)),
+            param.typeSignature match {
+              case definitions.IntTpe =>
+                Literal(Constant(0))
+
+              case _ =>
+                Literal(Constant(null))
+            })
       }
+      val optionalTrees = (optionParams ++ listParams).map {
+        case (name, param) =>
+          AssignOrNamedArg(Ident(newTermName(name)),
+            param.typeSignature match {
+              case definitions.IntTpe =>
+                Literal(Constant(0))
+
+              case _ =>
+                Literal(Constant(null))
+            })
+
+      }
+      requiredTrees.toList ++ optionalTrees
     }
 
     // make a tree that would call TTo's companion's object apply function with the values
@@ -162,6 +253,8 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
     // convert the tree to an expression
     c.Expr(tree)
+
+    abort("blaat")
   }
 
   /**
