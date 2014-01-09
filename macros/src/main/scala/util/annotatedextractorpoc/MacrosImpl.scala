@@ -58,14 +58,17 @@ object MacrosImpl {
     import c.universe._
     val helper = mkHelper[TFrom, TTo](c)
 
+
+
+
     helper.checkExtractableTypes()
 
     val body = helper.mapValueBody
 
     reify {
       new ExtractorHelper[TFrom, TTo] {
-        val fromTypeName = helper.fromTypeName.toString
-        val toTypeName = helper.toTypeName.toString
+        val fromTypeName = helper.fromTypeNameExpr.splice
+        val toTypeName = helper.toTypeNameExpr.splice
 
         def mapValue(obj: TFrom): TTo = body.splice
 
@@ -94,7 +97,10 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
   lazy val fromTypeName = fromType.typeSymbol.name
 
+  lazy val fromTypeNameExpr = c.Expr[String](Literal(Constant(fromTypeName.toString)))
+
   lazy val toTypeName = toType.typeSymbol.name
+  lazy val toTypeNameExpr = c.Expr[String](Literal(Constant(toTypeName.toString)))
 
   lazy val toCompanion = toType.typeSymbol.companionSymbol
 
@@ -152,7 +158,7 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     !(isOptionParam(targetParam) || isListParam(targetParam))
   }
 
-  def isOptionParam(targetParam: Symbol) : Boolean = {
+  def isOptionParam(targetParam: Symbol): Boolean = {
     val paramType = targetParam.typeSignature
     paramType <:< c.weakTypeOf[Option[_]]
   }
@@ -189,16 +195,15 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
   lazy val optionParams = targetParams.filter(kv => isOptionParam(kv._2))
   lazy val listParams = targetParams.filter(kv => isListParam(kv._2))
 
+  def mkList(tpe: Type, vals: List[Tree]): Tree = {
+    val valsTree = Apply(Ident(c.weakTypeOf[List[_]].typeSymbol.name), vals)
+    Apply(TypeApply(Ident(newTermName("mkList")), List(Ident(tpe.typeSymbol.name))), List(valsTree))
+  }
+
   /**
    * Creates the body of a mapValue method.
    */
   def mapValueBody: c.Expr[TTo] = {
-
-
-    // get a reference to the companion's apply method
-    // we'll use this for reflection only
-    val cTor: MethodSymbol = toApplyMethod
-
     // select the apply method from the companion object
     // we need the tree which you would've typed yourself, we cant just use the methodSymbol (for some reason)
     val constructorTree: Tree = Select(Ident(newTermName(toCompanion.name.toString)), newTermName("apply"))
@@ -215,11 +220,12 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     val values: List[Tree] = {
       // a reference to the TFrom object
       val obj = Ident(newTermName("obj"))
-      val requiredValues: Map[String, Tree] = ???
-      val optionalValues: Map[String, Tree] = ???
 
       // for each of the parameters to TTo.apply, make a tree that Selects the values with the same name
       // from the TFrom object
+
+      def paramVal(param: Symbol): Tree =
+        Select(obj, newTermName(param.name.toString))
 
       val requiredTrees = requiredParams.map {
         case (name, param) =>
@@ -232,7 +238,12 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
                 Literal(Constant(null))
             })
       }
-      val optionalTrees = (optionParams ++ listParams).map {
+      val listTrees = listParams.map {
+        case (name, param) =>
+          val sources = extractables(name).map(paramVal)
+          AssignOrNamedArg(Ident(newTermName(name)), mkList(param.typeSignature, sources))
+      }
+      val optionTrees = optionParams.map {
         case (name, param) =>
           AssignOrNamedArg(Ident(newTermName(name)),
             param.typeSignature match {
@@ -244,8 +255,10 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
             })
 
       }
-      requiredTrees.toList ++ optionalTrees
+      requiredTrees.toList ++ optionTrees ++ listTrees
     }
+
+    showRaw(values)
 
     // make a tree that would call TTo's companion's object apply function with the values
     // e.g. TTo.apply(value, value, ...)
@@ -254,7 +267,7 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     // convert the tree to an expression
     c.Expr(tree)
 
-    abort("blaat")
+//    abort("blaat")
   }
 
   /**
