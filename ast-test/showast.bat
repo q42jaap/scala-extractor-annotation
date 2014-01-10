@@ -1,1 +1,1 @@
-scalac -deprecation -Xprint:parser -Ystop-after:parser -Yshow-trees-compact test04.scala
+scalac -deprecation -Xprint:parser -Ystop-after:parser -Yshow-trees-compact test05.scala

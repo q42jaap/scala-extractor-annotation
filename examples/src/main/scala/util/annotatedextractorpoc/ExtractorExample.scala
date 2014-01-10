@@ -11,7 +11,7 @@ class title extends ExtractAnnotation
 
 object ExtractorExample extends App {
 
-  case class MainClass(@ancestorIds foo: String, @title bar: String, baz: Int)
+  case class MainClass(@ancestorIds foo: String, @ancestorIds foo2: Option[String], @title bar: String, baz: Int)
 
   case class SubSetClass1(bar: String)
 
@@ -26,7 +26,7 @@ object ExtractorExample extends App {
 
     implicit val extractor = annotatedExtractor[MainClass, Extractor1]
 
-    val mainVal = MainClass(foo = "fooVal", bar = "barVal", baz = 42)
+    val mainVal = MainClass(foo = "fooVal", foo2 = Some("foo2Val"), bar = "barVal", baz = 42)
     val mappedVal: Extractor1 = ObjMapper.mapValue(mainVal)
 
     println("Example1")

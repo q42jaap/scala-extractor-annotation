@@ -6,46 +6,50 @@ import reflect.macros.Context
 import util.objmapper.ObjMapper
 import scala.annotation.StaticAnnotation
 
-trait ExtractAnnotation extends StaticAnnotation
-
-abstract class ExtractorHelper[TFrom, TTo] extends ObjMapper[TFrom, TTo] {
-  val fromTypeName: String
-  val toTypeName: String
-
-  private def mkError(msg: String): IllegalStateException =
-    new IllegalStateException(s"Something error happen while mapping from $fromTypeName to $toTypeName: $msg")
-
-  def mkList[A](vals: List[_]): List[A] = {
-    val values = vals flatMap {
-      case it: Iterable[Option[A]] => it
-      case opt: Option[A] => List(opt)
-      case it: Iterable[A] => it.map(v => Some(v))
-      case v: A => List(Some(v))
-      case _ => throw mkError("Value has illegal type")
-    }
-    values.flatten
-  }
-
-  def mkOpt[A](vals: List[_]): Option[A] = {
-    val values = mkList[A](vals)
-
-    values match {
-      case Nil => None
-      case v :: Nil => Some(v)
-      case _ => throw mkError("Option value has more than 1 values")
-    }
-  }
-
-  def mkVal[A](vals: List[_]): A = {
-    val values = mkList[A](vals)
-
-    values match {
-      case Nil => throw mkError("Value is not available")
-      case v :: Nil => v
-      case _ => throw mkError("There are more than 1 valua available")
-    }
-  }
+object Xx {
+  def apply[T](x: T):List[T] = List(x)
 }
+
+trait ExtractAnnotation extends StaticAnnotation
+//
+//abstract class ExtractorHelper[TFrom, TTo] extends ObjMapper[TFrom, TTo] {
+//  val fromTypeName: String
+//  val toTypeName: String
+//
+//  private def mkError(msg: String): IllegalStateException =
+//    new IllegalStateException(s"Something error happen while mapping from $fromTypeName to $toTypeName: $msg")
+//
+//  def mkList[A](vals: List[_]): List[A] = {
+//    val values = vals flatMap {
+//      case it: Iterable[Option[A]] => it
+//      case opt: Option[A] => List(opt)
+//      case it: Iterable[A] => it.map(v => Some(v))
+//      case v: A => List(Some(v))
+//      case _ => throw mkError("Value has illegal type")
+//    }
+//    values.flatten
+//  }
+//
+//  def mkOpt[A](vals: List[_]): Option[A] = {
+//    val values = mkList[A](vals)
+//
+//    values match {
+//      case Nil => None
+//      case v :: Nil => Some(v)
+//      case _ => throw mkError("Option value has more than 1 values")
+//    }
+//  }
+//
+//  def mkVal[A](vals: List[_]): A = {
+//    val values = mkList[A](vals)
+//
+//    values match {
+//      case Nil => throw mkError("Value is not available")
+//      case v :: Nil => v
+//      case _ => throw mkError("There are more than 1 valua available")
+//    }
+//  }
+//}
 
 object MacrosImpl {
 
@@ -66,9 +70,9 @@ object MacrosImpl {
     val body = helper.mapValueBody
 
     reify {
-      new ExtractorHelper[TFrom, TTo] {
-        val fromTypeName = helper.fromTypeNameExpr.splice
-        val toTypeName = helper.toTypeNameExpr.splice
+      new ObjMapper[TFrom, TTo] {
+//        val fromTypeName = helper.fromTypeNameExpr.splice
+//        val toTypeName = helper.toTypeNameExpr.splice
 
         def mapValue(obj: TFrom): TTo = body.splice
 
@@ -149,9 +153,14 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     extrList.flatten.groupBy(_._1).mapValues(_.map(t => t._2))
   }
 
+  val listType = c.weakTypeOf[List[_]]
+  val listCompanionSymbol = listType.typeSymbol.companionSymbol
+
+  val optionType = c.weakTypeOf[Option[_]]
+
   def isListParam(targetParam: Symbol): Boolean = {
     val paramType = targetParam.typeSignature
-    paramType <:< c.weakTypeOf[List[_]]
+    paramType <:< listType
   }
 
   def isRequiredParam(targetParam: Symbol): Boolean = {
@@ -160,7 +169,7 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
   def isOptionParam(targetParam: Symbol): Boolean = {
     val paramType = targetParam.typeSignature
-    paramType <:< c.weakTypeOf[Option[_]]
+    paramType <:< optionType
   }
 
   def checkExtractableTypes() {
@@ -195,9 +204,45 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
   lazy val optionParams = targetParams.filter(kv => isOptionParam(kv._2))
   lazy val listParams = targetParams.filter(kv => isListParam(kv._2))
 
-  def mkList(tpe: Type, vals: List[Tree]): Tree = {
-    val valsTree = Apply(Ident(c.weakTypeOf[List[_]].typeSymbol.name), vals)
-    Apply(TypeApply(Ident(newTermName("mkList")), List(Ident(tpe.typeSymbol.name))), List(valsTree))
+  def paramVal(obj: Tree, param: Symbol): Tree =
+    Select(obj, param.name)
+
+  def mkListParam(targetParam: Symbol, sourceParams: List[Symbol], obj: Tree): Tree = {
+    assert(sourceParams.size > 0, "Internal error calling MacrosImpl.mkListParam")
+
+    // transforms the tree types of sourceParams to the Tree's where they're converted
+    // to Lists
+    val valsAsLists = sourceParams map { sourceParam =>
+      sourceParam.typeSignature match {
+        case paramType if paramType <:< listType =>
+          paramVal(obj, sourceParam)
+        case paramType if paramType <:< optionType =>
+          Select(
+            paramVal(obj, sourceParam),
+            newTermName("toList")
+          )
+        case _ =>
+          Apply(
+            Select(
+              Ident(listCompanionSymbol),
+              newTermName("apply")
+            ),
+            List(
+              paramVal(obj, sourceParam)
+            )
+          )
+      }
+    }
+    val resultingList = valsAsLists.tail.foldLeft(valsAsLists.head) { (acc, b) =>
+      Apply(
+        Select(acc, newTermName("$plus$plus")),
+        List(b)
+      )
+    }
+
+    echo(showRaw(resultingList))
+
+    resultingList
   }
 
   /**
@@ -224,12 +269,9 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
       // for each of the parameters to TTo.apply, make a tree that Selects the values with the same name
       // from the TFrom object
 
-      def paramVal(param: Symbol): Tree =
-        Select(obj, newTermName(param.name.toString))
-
       val requiredTrees = requiredParams.map {
         case (name, param) =>
-          AssignOrNamedArg(Ident(newTermName(name)),
+          AssignOrNamedArg(Ident(param.name),
             param.typeSignature match {
               case definitions.IntTpe =>
                 Literal(Constant(0))
@@ -239,13 +281,13 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
             })
       }
       val listTrees = listParams.map {
-        case (name, param) =>
-          val sources = extractables(name).map(paramVal)
-          AssignOrNamedArg(Ident(newTermName(name)), mkList(param.typeSignature, sources))
+        case (annotationName, param) =>
+          val sources = extractables(annotationName)
+          AssignOrNamedArg(Ident(param.name), mkListParam(param, sources, obj))
       }
       val optionTrees = optionParams.map {
-        case (name, param) =>
-          AssignOrNamedArg(Ident(newTermName(name)),
+        case (annotationName, param) =>
+          AssignOrNamedArg(Ident(param.name),
             param.typeSignature match {
               case definitions.IntTpe =>
                 Literal(Constant(0))
@@ -267,7 +309,7 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     // convert the tree to an expression
     c.Expr(tree)
 
-//    abort("blaat")
+    //abort("blaat")
   }
 
   /**
