@@ -7,10 +7,11 @@ import util.objmapper.ObjMapper
 import scala.annotation.StaticAnnotation
 
 object Xx {
-  def apply[T](x: T):List[T] = List(x)
+  def apply[T](x: T): List[T] = List(x)
 }
 
 trait ExtractAnnotation extends StaticAnnotation
+
 //
 //abstract class ExtractorHelper[TFrom, TTo] extends ObjMapper[TFrom, TTo] {
 //  val fromTypeName: String
@@ -71,8 +72,8 @@ object MacrosImpl {
 
     reify {
       new ObjMapper[TFrom, TTo] {
-//        val fromTypeName = helper.fromTypeNameExpr.splice
-//        val toTypeName = helper.toTypeNameExpr.splice
+        //        val fromTypeName = helper.fromTypeNameExpr.splice
+        //        val toTypeName = helper.toTypeNameExpr.splice
 
         def mapValue(obj: TFrom): TTo = body.splice
 
@@ -123,14 +124,14 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
         val annotations = getExtractAnnotationNames(param)
         annotations match {
           case name :: Nil => name -> param
-          case Nil => c.abort(param.pos, s"Parameter should have an annotation which extends ${extractAnnType.typeSymbol.name}")
-          case lst => c.abort(param.pos, s"Parameter should have just one annotation which extends ${extractAnnType.typeSymbol.name}")
+          case Nil => c.abort(param.pos, s"Parameter should have an annotation which extends ${extractAnnType.typeSymbol.name }")
+          case lst => c.abort(param.pos, s"Parameter should have just one annotation which extends ${extractAnnType.typeSymbol.name }")
         }
     }
     targetList.groupBy(_._1).foreach {
       tplListTpl: (String, List[(String, Symbol)]) =>
         if (tplListTpl._2.size > 1)
-          c.abort(tplListTpl._2.last._2.pos, s"In the type $toTypeName there should be just 1 ${tplListTpl._1} annotation")
+          c.abort(tplListTpl._2.last._2.pos, s"In the type $toTypeName there should be just 1 ${tplListTpl._1 } annotation")
     }
     targetList.toMap
   }
@@ -155,6 +156,8 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
   val listType = c.weakTypeOf[List[_]]
   val listCompanionSymbol = listType.typeSymbol.companionSymbol
+
+  val iterableType = c.weakTypeOf[Iterable[_]]
 
   val optionType = c.weakTypeOf[Option[_]]
 
@@ -213,36 +216,51 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     // transforms the tree types of sourceParams to the Tree's where they're converted
     // to Lists
     val valsAsLists = sourceParams map { sourceParam =>
+      val paramValue: Tree = paramVal(obj, sourceParam)
+
+      //      sourceParam.typeSignature
+
       sourceParam.typeSignature match {
         case paramType if paramType <:< listType =>
-          paramVal(obj, sourceParam)
+          paramValue
+        case paramType if paramType <:< iterableType =>
+          Select(paramValue, newTermName("toList"))
         case paramType if paramType <:< optionType =>
-          Select(
-            paramVal(obj, sourceParam),
-            newTermName("toList")
-          )
+          Select(paramValue, newTermName("toList"))
         case _ =>
           Apply(
-            Select(
-              Ident(listCompanionSymbol),
-              newTermName("apply")
-            ),
-            List(
-              paramVal(obj, sourceParam)
-            )
+            Select(Ident(listCompanionSymbol), newTermName("apply")),
+            List(paramValue)
           )
       }
     }
-    val resultingList = valsAsLists.tail.foldLeft(valsAsLists.head) { (acc, b) =>
+
+    Select(
       Apply(
-        Select(acc, newTermName("$plus$plus")),
-        List(b)
-      )
+        Select(Ident(listCompanionSymbol), newTermName("apply")),
+        valsAsLists
+      ),
+      newTermName("flatten")
+    )
+  }
+
+  def mkRequiredParam(annotationName: String, targetParam: Symbol, sourceParams: List[Symbol], obj: Tree): Tree = {
+    assert(sourceParams.size > 0, "Internal error calling MacrosImpl.mkRequiredParam")
+
+    val sourceParam :: tooMuch = sourceParams
+    if (!tooMuch.isEmpty)
+      c.abort(sourceParams.head.pos,
+        s"Cannot map to ${targetParam.name }, there are more than 1 params in $toTypeName annotated with @$annotationName")
+
+    val xx = sourceParam match {
+      case sourceParam if targetParam.typeSignature <:< sourceParam.typeSignature =>
+        paramVal(obj, sourceParam)
+      case _ =>
+        c.abort(sourceParam.pos,
+          s"Cannot map to ${targetParam.name}, it has not the same type")
     }
-
-    echo(showRaw(resultingList))
-
-    resultingList
+    echo(showRaw(xx))
+    xx
   }
 
   /**
@@ -253,11 +271,11 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
     // we need the tree which you would've typed yourself, we cant just use the methodSymbol (for some reason)
     val constructorTree: Tree = Select(Ident(newTermName(toCompanion.name.toString)), newTermName("apply"))
 
-    echo(s"$fromType extractables: ${extractables}")
+    echo(s"$fromType extractables: ${extractables }")
 
-    echo(s"$toType requiredParams: ${requiredParams}")
-    echo(s"$toType optionParams: ${optionParams}")
-    echo(s"$toType listParams: ${listParams}")
+    echo(s"$toType requiredParams: ${requiredParams }")
+    echo(s"$toType optionParams: ${optionParams }")
+    echo(s"$toType listParams: ${listParams }")
 
 
 
@@ -270,15 +288,9 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
       // from the TFrom object
 
       val requiredTrees = requiredParams.map {
-        case (name, param) =>
-          AssignOrNamedArg(Ident(param.name),
-            param.typeSignature match {
-              case definitions.IntTpe =>
-                Literal(Constant(0))
-
-              case _ =>
-                Literal(Constant(null))
-            })
+        case (annotationName, param) =>
+          val sources = extractables(annotationName)
+          AssignOrNamedArg(Ident(param.name), mkRequiredParam(annotationName, param, sources, obj))
       }
       val listTrees = listParams.map {
         case (annotationName, param) =>
@@ -344,7 +356,7 @@ private abstract class Helper[C <: Context, TFrom, TTo](val c: C) {
 
     if (!wrongProperties.isEmpty) {
       val wrongPropertieNames = wrongProperties.map(_.name).mkString(",")
-      c.abort(c.enclosingPosition, s"Could not create ObjMapper[$fromTypeName, $toTypeName], properties from $toTypeName don't match: ${wrongPropertieNames}")
+      c.abort(c.enclosingPosition, s"Could not create ObjMapper[$fromTypeName, $toTypeName], properties from $toTypeName don't match: ${wrongPropertieNames }")
     }
   }
 }
