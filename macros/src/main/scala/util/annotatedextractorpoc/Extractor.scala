@@ -6,7 +6,7 @@ package util.annotatedextractorpoc
  * @tparam T
  * @tparam TAnn
  */
-trait Extractor[TSource, T, TAnn <: ExtractAnnotation] {
+trait Extractor[TSource, T, TAnn <: ExtractAnnotation] extends DefaultExtractors {
   def getValues(obj: TSource): List[T]
 }
 
