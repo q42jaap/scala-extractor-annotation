@@ -17,3 +17,17 @@ class ExtractorBase[TAnn <: ExtractAnnotation] {
   }
 
 }
+
+trait DefaultExtractors {
+
+  implicit def traversableExtractor[TSource, Repr <% Traversable[TSource], T, TAnn <: ExtractAnnotation](implicit extractor: Extractor[TSource, T, TAnn]): Extractor[Repr, T, TAnn] = {
+    new TraversableExtractor[TSource, Repr, T, TAnn]
+  }
+
+}
+
+class TraversableExtractor[TSource, Repr <% Traversable[TSource], T, TAnn <: ExtractAnnotation](implicit extractor: Extractor[TSource, T, TAnn]) extends Extractor[Repr, T, TAnn] {
+  def getValues(objs: Repr): List[T] = {
+    objs.flatMap(obj => extractor.getValues(obj)).toList
+  }
+}

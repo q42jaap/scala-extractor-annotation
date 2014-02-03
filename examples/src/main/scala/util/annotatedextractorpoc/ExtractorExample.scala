@@ -3,16 +3,26 @@ package util.annotatedextractorpoc
 import util.objmapper.ObjMapper
 import scala.annotation.StaticAnnotation
 
+import util.annotatedextractorpoc._
+
 
 //class special extends extract("strings") with StaticAnnotation
 
 class ancestorIds extends ExtractAnnotation
 //class title extends ExtractAnnotation
 
-case class MainClass(@ancestorIds foo: String, @ancestorIds foo2: Option[String], bar: String, baz: Int)
+case class BarClass(@ancestorIds foo: String)
+
+case class MainClass(@ancestorIds foo: String, @ancestorIds foo2: Option[String], bar: BarClass, baz: Int)
 
 object AncestorIdsExtractor extends ExtractorBase[ancestorIds] {
   object implicits {
+    implicit val extBarClass: Extractor[BarClass, String, ancestorIds] = {
+      //Macros.extractor[BarClass, String, ancestorIds]
+      new Extractor[BarClass, String, ancestorIds] {
+        override def getValues(obj: BarClass): List[String] = List("Whoooohaaaa")
+      }
+    }
     implicit val extMainClass = Macros.extractor[MainClass, String, ancestorIds]
   }
 }
@@ -23,7 +33,7 @@ object ExtractorExample extends App {
 
     import AncestorIdsExtractor.implicits._
 
-    val mainVal = MainClass(foo = "fooVal", foo2 = Some("foo2Val"), bar = "barVal", baz = 42)
+    val mainVal = MainClass(foo = "fooVal", foo2 = Some("foo2Val"), bar = new BarClass("barVal"), baz = 42)
     val mappedVal: List[String] = AncestorIdsExtractor.getValues(mainVal)
 
     println("Example1")
