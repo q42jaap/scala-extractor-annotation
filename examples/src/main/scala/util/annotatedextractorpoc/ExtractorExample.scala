@@ -1,43 +1,34 @@
 package util.annotatedextractorpoc
 
-import util.objmapper.ObjMapper
-import scala.annotation.StaticAnnotation
 
 
-//class special extends extract("strings") with StaticAnnotation
 
 class ancestorIds extends ExtractAnnotation
+
 //class title extends ExtractAnnotation
 
 case class BarClass(@ancestorIds foo: String)
 
 case class MainClass(@ancestorIds foo: String, @ancestorIds foo2: Option[String], bar: List[BarClass], baz: Int)
 
-object AncestorIdsExtractor extends ExtractorBase[ancestorIds] {
-  object implicits {
-    implicit val extBarClass: Extractor[BarClass, String, ancestorIds] = {
-      Macros.extractor[BarClass, String, ancestorIds]
-      //new Extractor[BarClass, String, ancestorIds] {
-      //  override def getValues(obj: BarClass): List[String] = List("Whoooohaaaa")
-      //}
-    }
-
-    implicit val extMainClass = Macros.extractor[MainClass, String, ancestorIds]
-  }
+object AncestorIdsExtractor extends ExtractorBase[String, ancestorIds] {
+  implicit val extBarClass = extractor[BarClass]
+  implicit val extMainClass = extractor[MainClass]
 }
 
 object ExtractorExample extends App {
 
   def extractorExample1() {
 
-    import AncestorIdsExtractor.implicits._
+    import AncestorIdsExtractor._
 
     val mainVal = MainClass(foo = "fooVal", foo2 = Some("foo2Val"), bar = List(new BarClass("barVal"), new BarClass("Xxx")), baz = 42)
-    val mappedVal: List[String] = AncestorIdsExtractor.getValues(mainVal)
+    val mappedVal: List[String] = getValues(mainVal)
 
     println("Example1")
     printValues(mainVal, mappedVal)
   }
+
   /*
     def extractorExample2() {
       import Macros._
